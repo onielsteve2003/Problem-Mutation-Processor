@@ -2,3 +2,4 @@ pyyaml
 nbformat
 openai
 python-dotenv
+requests

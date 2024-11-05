@@ -1,1 +1,12 @@
-Rephrase the following problem: "{problem}"
+Rephrase the following programming problem in a clear, unambiguous way: "{problem}"
+
+Requirements:
+1. Maintain the original computational task
+2. Use precise, technical language
+3. Specify input constraints and types
+4. Define expected output format
+5. Include at least one example input/output
+6. Keep the scope identical to the original
+7. Do not add or remove requirements
+
+Format your response as a single paragraph without any additional formatting.

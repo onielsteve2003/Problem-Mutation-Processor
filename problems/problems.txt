@@ -3,3 +3,4 @@ Determine the area of a circle with radius r.
 Find the largest prime number less than 100.
 Calculate the volume of a cube with side length s.
 Convert 25 degrees Celsius to Fahrenheit.
+List 3 categories in computer science

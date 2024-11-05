@@ -1,1 +1,25 @@
-Solve the following problem and provide a detailed solution: "{problem}"
+Write a complete, properly indented Python function that solves this problem: "{problem}"
+
+Requirements:
+1. Use 4 spaces for indentation (no tabs)
+2. Include a function definition with proper parameters
+3. Initialize all variables before use
+4. Include print statements for the output
+5. Test the function with example input
+6. Ensure all code blocks (if/for/while) are properly indented with exactly 4 spaces
+7. Do not include explanatory comments or markdown
+8. Return only valid, runnable Python code
+9. The function must be called at the end of the file
+10. All nested code blocks must be indented with an additional 4 spaces
+11. The code must be complete and executable when saved to a .py file
+12. The output must be printed, not just returned
+
+Example format:
+def solve_problem(parameter):
+    # Your code here, indented with 4 spaces
+    if condition:
+        # Nested code indented with 8 spaces
+        statement
+    print(result)
+
+solve_problem(example_input)
