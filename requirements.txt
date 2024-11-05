@@ -1,0 +1,4 @@
+pyyaml
+nbformat
+openai
+python-dotenv

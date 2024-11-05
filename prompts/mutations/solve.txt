@@ -1,0 +1,1 @@
+Solve the following problem and provide a detailed solution: "{problem}"
