@@ -92,44 +92,43 @@ def generate_population(problem, population_size=3):
             })
     return population
 
+def calculate_kolmogorov_complexity(code):
+    """Calculate pure Kolmogorov complexity - simpler is better."""
+    # Remove comments and empty lines
+    cleaned_lines = []
+    for line in code.split('\n'):
+        line = line.strip()
+        if line and not line.startswith('#'):
+            # Preserve only essential whitespace
+            indent = len(line) - len(line.lstrip())
+            cleaned_line = ' '.join(word for word in line.split())
+            cleaned_lines.append(' ' * indent + cleaned_line)
+    
+    cleaned_code = '\n'.join(cleaned_lines)
+    
+    # Simple length-based score (shorter is better)
+    max_reasonable_length = 500
+    length_score = 70 * (1 - (len(cleaned_code) / max_reasonable_length))
+    
+    return max(0, length_score)  # Can't go negative
+
 def evaluate_fitness(solution_path, problem):
-    """Evaluate fitness of a solution (0-100)."""
+    """Evaluate fitness based purely on complexity and successful execution."""
     try:
-        result = subprocess.run(["python", solution_path], 
-                              capture_output=True, text=True, timeout=10)
+        with open(solution_path, 'r') as f:
+            code = f.read()
         
-        fitness = 0
-        if result.returncode == 0:
-            output = result.stdout.strip()
+        # Complexity score (70%)
+        complexity_score = calculate_kolmogorov_complexity(code)
+        
+        # Execution score (30%) - just needs to run and produce output
+        output, success = execute_solution_safely(solution_path)
+        execution_score = 30 if success and output else 0
             
-            # Basic output validation
-            if output:
-                fitness += 30  # Program runs and produces output
-                
-                # Check output matches problem type
-                if "prime" in problem.lower() and any(char.isdigit() for char in output):
-                    fitness += 20
-                elif "celsius" in problem.lower() and any(char.isdigit() for char in output):
-                    fitness += 20
-                elif "area" in problem.lower() and any(char.isdigit() for char in output):
-                    fitness += 20
-                
-                # Check code quality
-                with open(solution_path, 'r') as f:
-                    code = f.read()
-                    if 'def ' in code:
-                        fitness += 10  # Has function definition
-                    if code.count('\n') < 20:
-                        fitness += 10  # Concise solution
-                    if code.count('    ') > code.count('\t'):
-                        fitness += 10  # Proper indentation
-                    
-                # Additional problem-specific checks can be added here
-                
-        return fitness
+        return complexity_score + execution_score
         
     except Exception as e:
-        print(f"Evaluation failed: {e}")
+        print(f"Fitness evaluation failed: {e}")
         return 0
 
 def select_survivors(population, problem, survival_rate=0.5):
@@ -143,7 +142,7 @@ def select_survivors(population, problem, survival_rate=0.5):
     return population[:survivors_count]
 
 def mutate_survivors(survivors, problem, target_population_size=3, max_attempts=3):
-    """Mutate survivors to create new population with better error handling."""
+    """Mutate survivors with focus on simplification."""
     new_population = survivors.copy()
     attempts = 0
     
@@ -151,67 +150,147 @@ def mutate_survivors(survivors, problem, target_population_size=3, max_attempts=
         attempts += 1
         print(f"\nMutation attempt {attempts}")
         
-        # If all previous attempts failed, try more aggressive mutation
-        temperature = 0.3 + (attempts * 0.2)  # Increase randomness with each attempt
+        # Pick the fittest survivor as parent
+        parent = max(survivors, key=lambda x: x['fitness'])
         
-        # Pick a random survivor to mutate
-        parent = random.choice(survivors)
-        
-        # Try different mutation strategies
+        # Progressive mutation strategies
         if attempts == 1:
-            # First try: just rephrase the problem
-            mutated_problem, _ = mutate_problem(problem, mutation_type="rephrase")
+            # Try to simplify existing solution
+            mutated_problem = f"Solve this problem in the simplest way possible: {problem}"
         elif attempts == 2:
-            # Second try: more significant mutation
-            mutated_problem, _ = mutate_problem(problem, mutation_type="solve", temperature=temperature)
+            # Try alternative approach
+            mutated_problem, _ = mutate_problem(problem, mutation_type="rephrase")
         else:
-            # Last try: completely different approach
-            mutated_problem = f"Write a different solution for: {problem}"
+            # Completely different approach
+            mutated_problem = f"Write the shortest possible solution for: {problem}"
         
-        if not mutated_problem:
-            print("Failed to mutate problem, trying again...")
-            continue
-            
-        print(f"Generated mutated problem: {mutated_problem}")
-        
-        # Try to generate solution with increased temperature
+        temperature = 0.3 + (attempts * 0.1)  # Smaller temperature increments
         mutated_solution = generate_solution(mutated_problem, temperature=temperature)
+        
         if mutated_solution:
             file_path = save_solution(mutated_solution)
-            
-            # Verify the solution actually works before adding to population
             fitness = evaluate_fitness(file_path, problem)
-            if fitness > 0:  # Only add if it has some fitness
+            
+            # Only accept if it's simpler (higher fitness)
+            if fitness > parent['fitness']:
                 new_population.append({
                     'code': mutated_solution,
                     'file_path': file_path,
                     'fitness': fitness,
                     'generation': parent['generation'] + 1
                 })
-                print(f"Added new solution with fitness {fitness}")
+                print(f"Added improved solution with fitness {fitness}")
             else:
-                print("Generated solution had zero fitness, trying again...")
-        else:
-            print("Failed to generate solution, trying again...")
+                print("Solution not better than parent, trying again...")
     
-    if len(new_population) == 0:
-        print("WARNING: Failed to generate any valid solutions after all attempts")
-        # Return the original survivors rather than empty population
-        return survivors
+    return new_population if new_population else survivors
+
+def build_docker_image():
+    """Build the Docker image for code execution."""
+    try:
+        subprocess.run(
+            ["docker", "build", "-t", "code-runner", "."],
+            check=True,
+            capture_output=True
+        )
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to build Docker image: {e}")
+        return False
+
+def execute_solution_safely(file_path):
+    """Execute solution in isolated container."""
+    container_name = f"code_runner_{uuid.uuid4().hex}"
     
-    return new_population
+    try:
+        # Docker run with strict security constraints
+        docker_cmd = [
+            "docker", "run",
+            "--name", container_name,
+            "--rm",  # Remove container after execution
+            "--network", "none",  # No network access
+            "--memory", "100m",  # Limited memory
+            "--cpus", "0.5",  # Limited CPU
+            "--pids-limit", "50",  # Limited processes
+            "--ulimit", "nofile=64:64",  # Limited file descriptors
+            "--security-opt", "no-new-privileges",  # No privilege escalation
+            "-v", f"{os.path.abspath(file_path)}:/app/run/code.py:ro",  # Read-only mount
+            "code-runner",
+            "python", "-I", "/app/run/code.py"
+        ]
+        
+        result = subprocess.run(
+            docker_cmd,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        return result.stdout.strip(), result.returncode == 0
+        
+    except Exception as e:
+        print(f"Docker execution failed: {e}, falling back to subprocess")
+        try:
+            # Fallback to subprocess with basic isolation
+            result = subprocess.run(
+                ["python", "-I", file_path],  # Isolated mode
+                capture_output=True,
+                text=True,
+                timeout=2
+            )
+            return result.stdout.strip(), result.returncode == 0
+        except Exception as sub_e:
+            return str(sub_e), False
+    finally:
+        # Always clean up container
+        try:
+            subprocess.run(["docker", "rm", "-f", container_name], 
+                         capture_output=True)
+        except:
+            pass
+
+def check_docker_status():
+    """Check if Docker daemon is running and accessible."""
+    try:
+        # Check Docker daemon
+        subprocess.run(
+            ["docker", "info"],
+            check=True,
+            capture_output=True
+        )
+        
+        # Try to pull base image
+        subprocess.run(
+            ["docker", "pull", "python:3.9-slim"],
+            check=True,
+            capture_output=True
+        )
+        
+        return True
+    except subprocess.CalledProcessError:
+        return False
+    except FileNotFoundError:  # Docker not installed
+        return False
 
 def main():
+    # Check Docker status first
+    docker_available = check_docker_status()
+    if docker_available:
+        if build_docker_image():
+            print("Docker environment ready")
+        else:
+            print("WARNING: Docker available but build failed, using subprocess fallback")
+    else:
+        print("WARNING: Docker not available, using subprocess fallback")
+    
     problems = load_problems()
-    generations = 3  # Number of generations to evolve
+    generations = 3
     
     for problem in problems:
         print(f"\nProcessing problem: {problem}")
         
-        # Generate initial population
         population = generate_population(problem)
         if not population:
-            print(f"Failed to generate initial population for problem: {problem}")
             continue
         
         best_fitness = 0
@@ -220,24 +299,20 @@ def main():
         for gen in range(generations):
             print(f"\nGeneration {gen + 1}")
             
-            # Select survivors
             survivors = select_survivors(population, problem)
             if not survivors:
-                print("No survivors in this generation, trying mutation with previous best")
                 if best_solution:
                     survivors = [best_solution]
                 else:
-                    print("No previous best solution, skipping problem")
                     break
             
-            # Log results
-            for i, solution in enumerate(survivors):
-                print(f"Solution {i + 1} fitness: {solution['fitness']}")
+            # Log results and update best
+            for solution in survivors:
+                print(f"Solution fitness: {solution['fitness']}")
                 if solution['fitness'] > best_fitness:
                     best_fitness = solution['fitness']
                     best_solution = solution
             
-            # Check if we have a good enough solution
             if best_fitness >= 90:
                 print(f"Found excellent solution with fitness {best_fitness}")
                 update_leaderboard(problem, best_fitness, 
@@ -245,21 +320,15 @@ def main():
                                  mutation_used=(best_solution['generation'] > 1))
                 break
             
-            # Create next generation through mutation
             population = mutate_survivors(survivors, problem)
             
-            if not population:
-                print("Mutation failed to produce valid solutions")
-                break
-        
-        # If we didn't find a great solution, still save the best one we got
-        if best_fitness < 90 and best_solution:
-            print(f"Saving best solution found with fitness {best_fitness}")
+        # Save best solution even if not perfect
+        if best_solution:
             update_leaderboard(problem, best_fitness,
                              best_solution['file_path'],
                              mutation_used=(best_solution['generation'] > 1))
         
-        time.sleep(5)  # Delay between problems
+        time.sleep(5)  # Rate limiting cooldown
 
 if __name__ == "__main__":
     main()

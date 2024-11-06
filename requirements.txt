@@ -3,3 +3,4 @@ nbformat
 openai
 python-dotenv
 requests
+docker

@@ -1,6 +1,7 @@
 import os
 import time
 import requests
+import random
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -14,8 +15,8 @@ def load_prompt(mutation_type="solve"):
     with open(prompt_path, "r") as file:
         return file.read()
 
-def mutate_problem(problem, mutation_type="rephrase", temperature=0.7, max_tokens=800):
-    """Mutates a problem using Azure OpenAI API and a prompt template."""
+def mutate_problem(problem, mutation_type="rephrase", max_retries=5):
+    """Mutates a problem with exponential backoff for API calls."""
     prompt_template = load_prompt(mutation_type)
     prompt = prompt_template.format(problem=problem)
 
@@ -37,30 +38,25 @@ Rules:
 7. No markdown formatting"""}]},
             {"role": "user", "content": [{"type": "text", "text": prompt}]}
         ],
-        "temperature": temperature,  # Allow dynamic temperature
+        "temperature": 0.7,  # Allow dynamic temperature
         "top_p": 0.95,
-        "max_tokens": max_tokens  # Allow dynamic max_tokens
+        "max_tokens": 800  # Allow dynamic max_tokens
     }
 
-    for attempt in range(5):  # Retry up to 5 times
+    for attempt in range(max_retries):
         try:
             response = requests.post(ENDPOINT, headers=headers, json=payload)
-            response.raise_for_status()  # Check for HTTP errors
+            response.raise_for_status()
+            return response.json()['choices'][0]['message']['content'].strip(), mutation_type
             
-            # Parse and return response content
-            completion = response.json()
-            return completion['choices'][0]['message']['content'].strip(), mutation_type  # Return mutation type as well
-
         except requests.exceptions.HTTPError as e:
-            print(f"HTTP error occurred: {e}")
-            wait_time = 2 ** attempt
-            print(f"Retrying in {wait_time} seconds...")
-            time.sleep(wait_time)
-        except requests.exceptions.RequestException as e:
-            print(f"Request failed: {e}")
-            break
-            
-    return None, mutation_type  # Return mutation type in case of failure
+            if e.response.status_code == 429:  # Too Many Requests
+                wait_time = (2 ** attempt) + random.uniform(0, 1)  # Add jitter
+                print(f"Rate limited. Waiting {wait_time:.2f} seconds...")
+                time.sleep(wait_time)
+                continue
+            raise
+    return None, mutation_type
 
 def generate_solution(problem, mutation_type="solve", temperature=0.3, max_attempts=3):
     """Generates a Python solution for a problem using Azure OpenAI API."""
